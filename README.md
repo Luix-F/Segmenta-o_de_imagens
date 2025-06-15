@@ -1,1 +1,2 @@
-# Segmenta-o_de_imagens
+# Segmenta-
+Segmentação de imagens refere-se ao processo de dividir uma imagem digital em regiões ou objetos, com o objetivo de simplificar e/ou alterar sua representação para facilitar a análise. Geralmente, o resultado da segmentação de imagens é um conjunto de regiões ou objetos cujos pixels apresentam características semelhantes, como cor, intensidade, textura ou continuidade. Regiões adjacentes devem exibir diferenças significativas em relação à mesma característica.
