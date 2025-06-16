@@ -5,3 +5,6 @@ Para rodar as aplicações utilize o seguinte comando de c++:
 g++ NomeDoCodigo.cpp -o a `pkg-config --cflags --libs opencv4`
 
 Utilize 'esc' para fechar as janelas de visualização das imagens
+
+Artigo "Implementação e Análise Comparativa de Técnicas de Segmentação de Imagens Baseadas em Grafos": 
+https://pt.overleaf.com/read/ngpfydfywtmk#ff5714
