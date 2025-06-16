@@ -83,7 +83,7 @@ void onMouse(int event, int x, int y, int, void*) {
 }
 
 int main() {
-    Mat img = imread("./input/fl.png", IMREAD_COLOR);
+    Mat img = imread("./input/cores.png", IMREAD_COLOR);
     if (img.empty()) {
         cerr << "Erro ao carregar imagem!" << endl;
         return -1;

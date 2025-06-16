@@ -161,7 +161,7 @@ Mat segment_image(const Mat& image, float sigma = 0.8f, float k = 300.0f, int mi
 
 // ---------- Função principal ----------
 int main() {
-    Mat image = imread("./img/carFiltro.png");
+    Mat image = imread("./img/igFiltro.png");
     if (image.empty()) {
         cerr << "Erro ao carregar a imagem!" << endl;
         return -1;

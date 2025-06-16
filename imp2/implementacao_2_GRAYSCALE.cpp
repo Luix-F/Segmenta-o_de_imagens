@@ -66,34 +66,6 @@ void iftSegmentation(const Mat& img, const vector<Seed>& seeds, Mat& labelsOut) 
         }
     }
 }
-/*
-int main() {
-    // 1. Carregar imagem em tons de cinza
-    Mat img = imread("cores.png", IMREAD_GRAYSCALE);
-    if (img.empty()) {
-        cerr << "Erro ao carregar imagem!" << endl;
-        return -1;
-    }
-
-    // 2. Definir sementes (x, y, label)
-    vector<Seed> seeds = {
-        {133, 222, 100},  // região 1 (label 100)
-        {299, 306, 200}, // região 2 (label 200)
-        {140, 372, 300} // região 2 (label 200)
-    };
-
-    // 3. Rodar segmentação
-    Mat segmented;
-    iftSegmentation(img, seeds, segmented);
-
-    // 4. Mostrar e salvar resultado
-    imshow("Original", img);
-    imshow("Segmentada", segmented);
-    imwrite("resultado_segmentado.png", segmented);
-    waitKey(0);
-    return 0;
-}*/
-
 
 vector<Seed> seeds;
 int currentLabel = 100;
@@ -107,7 +79,7 @@ void onMouse(int event, int x, int y, int, void*) {
 }
 
 int main() {
-    Mat img = imread("./input/fl.png", IMREAD_GRAYSCALE);
+    Mat img = imread("./input/pr.png", IMREAD_GRAYSCALE);
     if (img.empty()) return -1;
 
     namedWindow("Clique para sementes");
