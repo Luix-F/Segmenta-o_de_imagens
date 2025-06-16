@@ -15,4 +15,3 @@ Para compilar o código, certifique-se de ter o OpenCV4 instalado e execute o se
 
 ```bash
 g++ NomeDoCodigo.cpp -o a `pkg-config --cflags --libs opencv4`
-```bash
