@@ -1,178 +1,231 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
-#include <tuple>
-#include <unordered_map>
-#include <unordered_set>
 #include <algorithm>
+#include <cmath>
+#include <unordered_map>
 #include <random>
-#include <iostream>
-#include <numeric>
 
 using namespace cv;
 using namespace std;
 
-// ---------- Estrutura de Aresta ----------
+// Estrutura para representar uma aresta
 struct Edge {
-    float w;
+    float weight;
     int u, v;
-    bool operator<(const Edge& o) const { return w < o.w; }
+    Edge(float w, int u_, int v_) : weight(w), u(u_), v(v_) {}
+    bool operator<(const Edge& other) const { return weight < other.weight; }
 };
 
-// ---------- Disjoint-Set (Union-Find) ----------
-class DSU {
+// Classe Disjoint-Set para gerenciar componentes
+class DisjointSet {
 public:
-    vector<int> parent, size;
-    vector<float> internal;
+    vector<int> parent, rank, size;
+    vector<float> int_val; // Diferença interna (Int(C))
 
-    DSU(int n) : parent(n), size(n, 1), internal(n, 0.0f) {
-        iota(parent.begin(), parent.end(), 0);
+    DisjointSet(int n) {
+        parent.resize(n);
+        rank.resize(n, 0);
+        size.resize(n, 1);
+        int_val.resize(n, 0.0f);
+        for (int i = 0; i < n; ++i) parent[i] = i;
     }
 
     int find(int x) {
-        return parent[x] == x ? x : parent[x] = find(parent[x]);
+        if (parent[x] != x) parent[x] = find(parent[x]); // Compressão de caminho
+        return parent[x];
     }
 
-    void join(int x, int y, float w) {
-        x = find(x); y = find(y);
-        if (x == y) return;
-        if (size[x] < size[y]) swap(x, y);
-        parent[y] = x;
-        size[x] += size[y];
-        internal[x] = max({internal[x], internal[y], w});
-    }
-};
-
-// ---------- Função hash para tupla 3D ----------
-struct TupleHash {
-    size_t operator()(const tuple<int, int, int>& t) const {
-        auto [a, b, c] = t;
-        return ((hash<int>()(a) ^ (hash<int>()(b) << 1)) >> 1) ^ (hash<int>()(c) << 1);
+    void union_sets(int x, int y, float weight) {
+        int px = find(x), py = find(y);
+        if (px == py) return;
+        // União por rank
+        if (rank[px] < rank[py]) swap(px, py);
+        parent[py] = px;
+        size[px] += size[py];
+        int_val[px] = max({int_val[px], int_val[py], weight});
+        if (rank[px] == rank[py]) rank[px]++;
     }
 };
 
-// ---------- Construção do grafo ----------
-vector<Edge> build_edges(const Mat& img) {
-    int h = img.rows, w = img.cols;
+// Gera arestas para um grafo 8-conectado
+vector<Edge> get_edges(const Mat& channel, float sigma) {
+    Mat smoothed;
+    if (sigma > 0) {
+        GaussianBlur(channel, smoothed, Size(0, 0), sigma);
+    } else {
+        smoothed = channel.clone();
+    }
+
+    int height = channel.rows, width = channel.cols;
     vector<Edge> edges;
-    auto at = [&](int y, int x) { return img.at<float>(y, x); };
 
-    for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-            int idx = y * w + x;
-            if (x + 1 < w) edges.push_back({abs(at(y, x) - at(y, x+1)), idx, idx+1});
-            if (y + 1 < h) edges.push_back({abs(at(y, x) - at(y+1, x)), idx, idx+w});
-            if (x + 1 < w && y + 1 < h)
-                edges.push_back({abs(at(y, x) - at(y+1, x+1)), idx, idx+w+1});
-            if (x > 0 && y + 1 < h)
-                edges.push_back({abs(at(y, x) - at(y+1, x-1)), idx, idx+w-1});
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            int idx = y * width + x;
+            // Direita
+            if (x + 1 < width) {
+                float weight = abs(smoothed.at<float>(y, x) - smoothed.at<float>(y, x + 1));
+                edges.emplace_back(weight, idx, idx + 1);
+            }
+            // Baixo
+            if (y + 1 < height) {
+                float weight = abs(smoothed.at<float>(y, x) - smoothed.at<float>(y + 1, x));
+                edges.emplace_back(weight, idx, idx + width);
+            }
+            // Diagonal: baixo-direita
+            if (x + 1 < width && y + 1 < height) {
+                float weight = abs(smoothed.at<float>(y, x) - smoothed.at<float>(y + 1, x + 1));
+                edges.emplace_back(weight, idx, idx + width + 1);
+            }
+            // Diagonal: baixo-esquerda
+            if (x > 0 && y + 1 < height) {
+                float weight = abs(smoothed.at<float>(y, x) - smoothed.at<float>(y + 1, x - 1));
+                edges.emplace_back(weight, idx, idx + width - 1);
+            }
         }
+    }
     return edges;
 }
 
-// ---------- Segmentação de um canal ----------
+// Segmenta um canal da imagem
 Mat segment_channel(const Mat& channel, float sigma, float k, int min_size) {
-    Mat img;
-    channel.convertTo(img, CV_32F);
-    if (sigma > 0) GaussianBlur(img, img, Size(), sigma);
+    int height = channel.rows, width = channel.cols;
+    int n_vertices = height * width;
 
-    int h = img.rows, w = img.cols, n = h * w;
-    DSU dsu(n);
-    auto edges = build_edges(img);
+    // Converte o canal para float
+    Mat channel_float;
+    channel.convertTo(channel_float, CV_32F);
+
+    // Inicializa Disjoint-Set
+    DisjointSet ds(n_vertices);
+
+    // Obtém arestas
+    vector<Edge> edges = get_edges(channel_float, sigma);
+
+    // Ordena arestas por peso
     sort(edges.begin(), edges.end());
 
-    for (const auto& e : edges) {
-        int u = dsu.find(e.u), v = dsu.find(e.v);
-        if (u != v) {
-            float thresh = min(dsu.internal[u] + k / dsu.size[u],
-                               dsu.internal[v] + k / dsu.size[v]);
-            if (e.w <= thresh)
-                dsu.join(e.u, e.v, e.w);
+    // Processa arestas
+    for (const auto& edge : edges) {
+        int pu = ds.find(edge.u), pv = ds.find(edge.v);
+        if (pu != pv) {
+            float mint = min(ds.int_val[pu] + k / ds.size[pu], ds.int_val[pv] + k / ds.size[pv]);
+            if (edge.weight <= mint) {
+                ds.union_sets(edge.u, edge.v, edge.weight);
+            }
         }
     }
 
-    for (const auto& e : edges) {
-        int u = dsu.find(e.u), v = dsu.find(e.v);
-        if (u != v && (dsu.size[u] < min_size || dsu.size[v] < min_size))
-            dsu.join(e.u, e.v, e.w);
+    // Impõe tamanho mínimo
+    for (const auto& edge : edges) {
+        int pu = ds.find(edge.u), pv = ds.find(edge.v);
+        if (pu != pv && (ds.size[pu] < min_size || ds.size[pv] < min_size)) {
+            ds.union_sets(edge.u, edge.v, edge.weight);
+        }
     }
 
-    Mat result(h, w, CV_32S);
-    for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x)
-            result.at<int>(y, x) = dsu.find(y * w + x);
-    return result;
+    // Cria mapa de segmentação
+    Mat segmentation(height, width, CV_32S);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            int idx = y * width + x;
+            segmentation.at<int>(y, x) = ds.find(idx);
+        }
+    }
+
+    return segmentation;
 }
 
-// ---------- Interseção entre segmentações ----------
-Mat intersect_segmentations(const Mat& r, const Mat& g, const Mat& b) {
-    int h = r.rows, w = r.cols;
-    Mat result(h, w, CV_32S);
-    unordered_map<tuple<int, int, int>, int, TupleHash> label_map;
+// Intersecta as segmentações dos canais R, G, B
+Mat intersect_segmentations(const Mat& seg_r, const Mat& seg_g, const Mat& seg_b) {
+    int height = seg_r.rows, width = seg_r.cols;
+    Mat segmentation(height, width, CV_32S);
+    unordered_map<string, int> label_map;
     int next_label = 0;
 
-    for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x) {
-            auto key = make_tuple(
-                r.at<int>(y, x),
-                g.at<int>(y, x),
-                b.at<int>(y, x)
-            );
-            if (label_map.count(key) == 0)
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            // Cria uma chave única para o triplet (R, G, B)
+            string key = to_string(seg_r.at<int>(y, x)) + "_" +
+                         to_string(seg_g.at<int>(y, x)) + "_" +
+                         to_string(seg_b.at<int>(y, x));
+            if (label_map.find(key) == label_map.end()) {
                 label_map[key] = next_label++;
-            result.at<int>(y, x) = label_map[key];
+            }
+            segmentation.at<int>(y, x) = label_map[key];
         }
-    return result;
+    }
+
+    return segmentation;
 }
 
-// ---------- Gera cor RGB aleatória ----------
+// Gera uma cor RGB aleatória
 Vec3b random_color(mt19937& rng) {
     uniform_int_distribution<int> dist(0, 255);
     return Vec3b(dist(rng), dist(rng), dist(rng));
 }
 
-// ---------- Pipeline completo de segmentação ----------
+// Segmenta uma imagem colorida e gera saída colorida
 Mat segment_image(const Mat& image, float sigma = 0.8f, float k = 300.0f, int min_size = 50) {
-    vector<Mat> channels(3);
-    split(image, channels); // BGR
+    // Separa os canais R, G, B
+    vector<Mat> channels;
+    split(image, channels); // channels[0] = B, channels[1] = G, channels[2] = R
 
-    Mat seg_r = segment_channel(channels[2], sigma, k, min_size);
-    Mat seg_g = segment_channel(channels[1], sigma, k, min_size);
-    Mat seg_b = segment_channel(channels[0], sigma, k, min_size);
+    // Segmenta cada canal
+    Mat seg_r = segment_channel(channels[2], sigma, k, min_size); // R
+    Mat seg_g = segment_channel(channels[1], sigma, k, min_size); // G
+    Mat seg_b = segment_channel(channels[0], sigma, k, min_size); // B
 
-    Mat labels = intersect_segmentations(seg_r, seg_g, seg_b);
+    // Intersecta as segmentações
+    Mat segmentation = intersect_segmentations(seg_r, seg_g, seg_b);
 
-    unordered_set<int> unique_labels;
-    for (int y = 0; y < labels.rows; ++y)
-        for (int x = 0; x < labels.cols; ++x)
-            unique_labels.insert(labels.at<int>(y, x));
+    // Re-rotula para inteiros consecutivos
+    vector<int> labels;
+    for (int y = 0; y < segmentation.rows; ++y) {
+        for (int x = 0; x < segmentation.cols; ++x) {
+            labels.push_back(segmentation.at<int>(y, x));
+        }
+    }
+    sort(labels.begin(), labels.end());
+    labels.erase(unique(labels.begin(), labels.end()), labels.end());
 
+    // Gera cores aleatórias para cada rótulo
     mt19937 rng(random_device{}());
     unordered_map<int, Vec3b> color_map;
-    for (int label : unique_labels)
+    for (int label : labels) {
         color_map[label] = random_color(rng);
+    }
 
-    Mat output(labels.rows, labels.cols, CV_8UC3);
-    for (int y = 0; y < labels.rows; ++y)
-        for (int x = 0; x < labels.cols; ++x)
-            output.at<Vec3b>(y, x) = color_map[labels.at<int>(y, x)];
+    // Cria imagem colorida de segmentação
+    Mat seg_vis(segmentation.rows, segmentation.cols, CV_8UC3);
+    for (int y = 0; y < segmentation.rows; ++y) {
+        for (int x = 0; x < segmentation.cols; ++x) {
+            int label = segmentation.at<int>(y, x);
+            seg_vis.at<Vec3b>(y, x) = color_map[label];
+        }
+    }
 
-    return output;
+    return seg_vis;
 }
 
-// ---------- Função principal ----------
 int main() {
-    Mat image = imread("./img/igFiltro.png");
+    // Carrega a imagem colorida
+    Mat image = imread("./img/carFiltro.png", IMREAD_COLOR);
     if (image.empty()) {
         cerr << "Erro ao carregar a imagem!" << endl;
         return -1;
     }
 
+    // Parâmetros
     float sigma = 0.8f;
     float k = 300.0f;
     int min_size = 50;
 
-    Mat segmented = segment_image(image, sigma, k, min_size);    
+    // Segmenta a imagem
+    Mat seg_vis = segment_image(image, sigma, k, min_size);
 
-    imwrite("./output-png/segmented_image_COLOR.jpg", segmented);
+    // Salva a imagem segmentada
+    imwrite("./output-png/segmented_image_COLOR.jpg", seg_vis);
+
     return 0;
 }
